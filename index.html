@@ -691,26 +691,26 @@ function spawnTargets() {
   const W=canvas.width, H=canvas.height;
   const t=(gs.stage-1)/Math.max(gs.stageCount-1,1);
   const baseR=lerp(72,26,t);
-  const baseSpd=lerp(80,260,t);  // 전체 속도 상향
+  const baseSpd=lerp(80,260,t);
   const num=Math.min(1+Math.floor(gs.stage/2),4);
-  // maxY를 worldH보다 충분히 작게 → 하단 경계에서도 상하 이동 유지
   const worldH=H*0.72;
-  const minY=90;
-  const maxY=worldH*0.82; // 하단 여유 확보 (기존 worldH-r 대신)
+  const minY=90, maxY=worldH*0.80;
 
   for(let i=0;i<num;i++){
     const r=baseR+rand(0,10);
-    // dy를 dx와 동등하게 — 수직 속도 충분히 확보
-    const speed=baseSpd+rand(0,50);
-    const angle=rand(25,65)*(Math.PI/180); // 25~65도 각도로 이동
+    const spd=baseSpd+rand(0,50);
+    // 수직 이동이 충분하도록 30~60도 고정
+    const angle=rand(30,60)*(Math.PI/180);
     const dirX=Math.random()<0.5?1:-1;
     const dirY=Math.random()<0.5?1:-1;
     targets.push({
       wx:rand(r+60,W-r-60),
       wy:rand(minY+r, maxY-r),
       r,
-      dx:dirX*speed*Math.cos(angle),
-      dy:dirY*speed*Math.sin(angle),
+      dx:dirX*spd*Math.cos(angle),
+      dy:dirY*spd*Math.sin(angle),
+      initSpd:spd,        // 속도 복원용
+      initAngle:angle,    // 각도 복원용
       hit:false, alpha:1,
     });
   }
@@ -812,11 +812,36 @@ function drawWorld(ctx,W,H,dt) {
     if(t.hit){ t.alpha=Math.max(0,t.alpha-dt*4); }
     else {
       t.wx+=t.dx*dt; t.wy+=t.dy*dt;
-      const minY=90, maxY=worldH*0.82;
-      if(t.wx-t.r<0){t.wx=t.r;t.dx=Math.abs(t.dx);}
-      if(t.wx+t.r>W){t.wx=W-t.r;t.dx=-Math.abs(t.dx);}
-      if(t.wy-t.r<minY){t.wy=minY+t.r;t.dy=Math.abs(t.dy);}
-      if(t.wy+t.r>maxY){t.wy=maxY-t.r;t.dy=-Math.abs(t.dy);}
+      const minY=90, maxY=worldH*0.80;
+
+      // 경계 충돌: 위치 보정 + 속도 반전 (크기 보존)
+      if(t.wx-t.r<0){
+        t.wx=t.r;
+        t.dx=Math.abs(t.dx);   // 반드시 오른쪽
+      }
+      if(t.wx+t.r>W){
+        t.wx=W-t.r;
+        t.dx=-Math.abs(t.dx);  // 반드시 왼쪽
+      }
+      if(t.wy-t.r<minY){
+        t.wy=minY+t.r;
+        t.dy=Math.abs(t.dy);   // 반드시 아래쪽
+      }
+      if(t.wy+t.r>maxY){
+        t.wy=maxY-t.r;
+        t.dy=-Math.abs(t.dy);  // 반드시 위쪽
+
+        // 속도가 소멸됐으면 초기 속도로 복원
+        if(Math.abs(t.dy)<10) t.dy=-(t.initSpd*Math.sin(t.initAngle));
+      }
+
+      // 속도 크기가 너무 작아진 경우 전체 복원 (에너지 손실 방지)
+      const spd=Math.hypot(t.dx,t.dy);
+      if(spd<t.initSpd*0.5){
+        const angle=Math.atan2(t.dy,t.dx);
+        t.dx=Math.cos(angle)*t.initSpd;
+        t.dy=Math.sin(angle)*t.initSpd;
+      }
     }
     if(t.alpha>0) drawTarget(ctx,t);
   }
