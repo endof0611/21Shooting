@@ -186,11 +186,75 @@ body {
 /* ===== MOBILE CONTROLS ===== */
 #controlsOverlay { position:fixed; inset:0; z-index:40; pointer-events:none; display:none; }
 
+/* --- LANDSCAPE (기본 / 가로) --- */
 #joystickZone {
   position:absolute; left:0; bottom:0;
   width:50%; height:55%;
   pointer-events:auto;
 }
+#fireZone {
+  position:absolute; right:0; bottom:0; width:50%; height:55%;
+  pointer-events:auto;
+  display:flex; align-items:center; justify-content:center;
+}
+#adsBtn {
+  position:fixed; left:16px;
+  bottom:max(138px,calc(env(safe-area-inset-bottom,0px)+138px));
+  width:54px; height:54px; border-radius:50%;
+  background:rgba(12,20,35,0.9); border:1px solid rgba(200,168,75,0.3);
+  color:var(--accent); font-size:22px;
+  display:none; align-items:center; justify-content:center;
+  z-index:50; cursor:pointer; touch-action:manipulation;
+}
+#ammoBar {
+  position:fixed; bottom:max(14px,env(safe-area-inset-bottom,14px)); left:50%;
+  transform:translateX(-50%);
+  display:none; gap:5px; align-items:center; z-index:50; pointer-events:none;
+}
+
+/* --- PORTRAIT (세로) 오버라이드 --- */
+@media (orientation: portrait) {
+  /* 세로에선 조이스틱 왼쪽 하단, 파이어 오른쪽 하단, 높이 더 확보 */
+  #joystickZone {
+    width: 50%;
+    height: 38%;
+    bottom: 0; left: 0;
+  }
+  #fireZone {
+    width: 50%;
+    height: 38%;
+    bottom: 0; right: 0;
+  }
+  /* ADS 버튼: 세로에서는 오른쪽 하단 파이어 위로 */
+  #adsBtn {
+    left: auto;
+    right: 16px;
+    bottom: max(170px, calc(env(safe-area-inset-bottom,0px) + 170px));
+  }
+  /* 탄약 바 세로에서 더 위로 */
+  #ammoBar {
+    bottom: max(10px, env(safe-area-inset-bottom,10px));
+  }
+  /* HUD: 세로에서 글자 더 작게 */
+  .hud-value { font-size:13px; }
+  .hud-label { font-size:7px; }
+  /* 총구 세로에서 중앙 더 내리기 */
+  #muzzleFlash { width:140px; height:140px; }
+  /* 타이머바 위치 */
+  #timerBar { top:56px; }
+  #zoomIndicator { top:62px; }
+}
+
+/* --- LANDSCAPE safe area (노치 대응) --- */
+@media (orientation: landscape) {
+  #joystickZone {
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+  #fireZone {
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+}
+
 #joystickBase {
   position:absolute; width:110px; height:110px; border-radius:50%;
   border:2px solid rgba(200,168,75,0.35);
@@ -202,12 +266,6 @@ body {
   background:radial-gradient(circle,rgba(200,168,75,0.9),rgba(160,120,20,0.7));
   box-shadow:0 2px 12px rgba(200,168,75,0.5);
   transform:translate(-50%,-50%); top:50%; left:50%;
-}
-
-#fireZone {
-  position:absolute; right:0; bottom:0; width:50%; height:55%;
-  pointer-events:auto;
-  display:flex; align-items:center; justify-content:center;
 }
 #fireBtn {
   width:90px; height:90px; border-radius:50%;
@@ -224,21 +282,14 @@ body {
 #fireBtn.pressed { transform:scale(0.88); box-shadow:0 0 10px rgba(232,72,85,0.3); }
 #fireBtn .fire-icon { font-size:22px; }
 
-#adsBtn {
-  position:fixed; left:16px;
-  bottom:max(138px,calc(env(safe-area-inset-bottom,0px)+138px));
-  width:54px; height:54px; border-radius:50%;
-  background:rgba(12,20,35,0.9); border:1px solid rgba(200,168,75,0.3);
-  color:var(--accent); font-size:22px;
-  display:none; align-items:center; justify-content:center;
-  z-index:50; cursor:pointer; touch-action:manipulation;
+/* 세로에서 파이어 버튼 약간 작게 */
+@media (orientation: portrait) {
+  #fireBtn { width:80px; height:80px; font-size:11px; }
+  #fireBtn .fire-icon { font-size:20px; }
+  #joystickBase { width:100px; height:100px; }
+  #joystickKnob { width:38px; height:38px; }
 }
 
-#ammoBar {
-  position:fixed; bottom:max(14px,env(safe-area-inset-bottom,14px)); left:50%;
-  transform:translateX(-50%);
-  display:none; gap:5px; align-items:center; z-index:50; pointer-events:none;
-}
 .ammo-pip {
   width:7px; height:20px; border-radius:2px;
   background:var(--accent); box-shadow:0 0 5px rgba(200,168,75,0.5);
@@ -434,6 +485,127 @@ let targets=[], particles=[], bulletHoles=[];
 let rafId=null, stageTimer=null, timeLeft=15, lastTs=0;
 
 // ─────────────────────────────
+//  SOUND ENGINE (Web Audio API)
+// ─────────────────────────────
+let audioCtx=null;
+function getACtx(){
+  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==='suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+function playGunshot(){
+  const ctx=getACtx(), t=ctx.currentTime;
+  // 노이즈 (총성 몸체)
+  const bufLen=ctx.sampleRate*0.25;
+  const buf=ctx.createBuffer(1,bufLen,ctx.sampleRate);
+  const d=buf.getChannelData(0);
+  for(let i=0;i<bufLen;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/bufLen,2.5);
+  const src=ctx.createBufferSource(); src.buffer=buf;
+  const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=900;
+  const gain=ctx.createGain();
+  gain.gain.setValueAtTime(0,t);
+  gain.gain.linearRampToValueAtTime(2.0,t+0.004);
+  gain.gain.exponentialRampToValueAtTime(0.001,t+0.22);
+  src.connect(lp); lp.connect(gain); gain.connect(ctx.destination);
+  src.start(t); src.stop(t+0.25);
+  // 임팩트 클릭
+  const osc=ctx.createOscillator();
+  osc.frequency.setValueAtTime(200,t);
+  osc.frequency.exponentialRampToValueAtTime(60,t+0.07);
+  const og=ctx.createGain();
+  og.gain.setValueAtTime(0.9,t);
+  og.gain.exponentialRampToValueAtTime(0.001,t+0.09);
+  osc.connect(og); og.connect(ctx.destination);
+  osc.start(t); osc.stop(t+0.09);
+}
+
+function playHit(perfect=false){
+  const ctx=getACtx(), t=ctx.currentTime;
+  const osc=ctx.createOscillator();
+  osc.type='sine';
+  osc.frequency.setValueAtTime(perfect?1400:900,t);
+  osc.frequency.exponentialRampToValueAtTime(perfect?700:450,t+0.3);
+  const g=ctx.createGain();
+  g.gain.setValueAtTime(0.55,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+0.3);
+  osc.connect(g); g.connect(ctx.destination);
+  osc.start(t); osc.stop(t+0.3);
+  if(perfect){
+    const o2=ctx.createOscillator(); o2.type='triangle';
+    o2.frequency.setValueAtTime(2000,t+0.04);
+    o2.frequency.exponentialRampToValueAtTime(1000,t+0.45);
+    const g2=ctx.createGain();
+    g2.gain.setValueAtTime(0.3,t+0.04);
+    g2.gain.exponentialRampToValueAtTime(0.001,t+0.45);
+    o2.connect(g2); g2.connect(ctx.destination);
+    o2.start(t+0.04); o2.stop(t+0.45);
+  }
+}
+
+function playMiss(){
+  const ctx=getACtx(), t=ctx.currentTime;
+  const osc=ctx.createOscillator(); osc.type='sawtooth';
+  osc.frequency.setValueAtTime(500,t);
+  osc.frequency.exponentialRampToValueAtTime(180,t+0.12);
+  const g=ctx.createGain();
+  g.gain.setValueAtTime(0.12,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+0.12);
+  osc.connect(g); g.connect(ctx.destination);
+  osc.start(t); osc.stop(t+0.13);
+}
+
+function playReload(){
+  const ctx=getACtx(), t=ctx.currentTime;
+  [0,0.18].forEach((delay,i)=>{
+    const osc=ctx.createOscillator(); osc.type='square';
+    osc.frequency.value=i===0?280:420;
+    const g=ctx.createGain();
+    g.gain.setValueAtTime(0.18,t+delay);
+    g.gain.exponentialRampToValueAtTime(0.001,t+delay+0.07);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(t+delay); osc.stop(t+delay+0.08);
+  });
+}
+
+function playTimerBeep(urgent=false){
+  const ctx=getACtx(), t=ctx.currentTime;
+  const osc=ctx.createOscillator(); osc.type='sine';
+  osc.frequency.value=urgent?940:660;
+  const g=ctx.createGain();
+  g.gain.setValueAtTime(0.22,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+0.1);
+  osc.connect(g); g.connect(ctx.destination);
+  osc.start(t); osc.stop(t+0.11);
+}
+
+function playStageStart(){
+  const ctx=getACtx(), t=ctx.currentTime;
+  [0,0.2,0.4].forEach((delay,i)=>{
+    const osc=ctx.createOscillator(); osc.type='sine';
+    osc.frequency.value=[440,554,659][i];
+    const g=ctx.createGain();
+    g.gain.setValueAtTime(0.28,t+delay);
+    g.gain.exponentialRampToValueAtTime(0.001,t+delay+0.18);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(t+delay); osc.stop(t+delay+0.19);
+  });
+}
+
+function playGameOver(){
+  const ctx=getACtx(), t=ctx.currentTime;
+  [659,554,440,330].forEach((freq,i)=>{
+    const osc=ctx.createOscillator(); osc.type='sine';
+    osc.frequency.value=freq;
+    const g=ctx.createGain();
+    g.gain.setValueAtTime(0.28,t+i*0.16);
+    g.gain.exponentialRampToValueAtTime(0.001,t+i*0.16+0.2);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(t+i*0.16); osc.stop(t+i*0.16+0.21);
+  });
+}
+
+// ─────────────────────────────
 //  PLAYER INPUTS
 // ─────────────────────────────
 function renderPlayerInputs() {
@@ -481,7 +653,7 @@ function initStage() {
   const ann=document.getElementById('stageAnnounce');
   ann.innerHTML=`${gs.players[gs.pIdx]}<br>STAGE ${gs.stage} / ${gs.stageCount}`;
   ann.classList.add('show');
-  setTimeout(()=>{ ann.classList.remove('show'); beginPlay(); }, 2000);
+  setTimeout(()=>{ ann.classList.remove('show'); playStageStart(); beginPlay(); }, 2000);
 }
 
 function beginPlay() {
@@ -500,6 +672,8 @@ function beginPlay() {
     el.className='hud-value'+(timeLeft<=5?' danger':'');
     document.getElementById('timerFill').style.width=(timeLeft/gs.timePerStage*100)+'%';
     if(timeLeft<=5) document.getElementById('timerFill').style.background='linear-gradient(to right,#e84855,#ff6b7a)';
+    // 타이머 비프음
+    if(timeLeft<=5 && timeLeft>0) playTimerBeep(timeLeft<=3);
     if(timeLeft<=0){ clearInterval(stageTimer); endStage(); }
   },1000);
 
@@ -517,18 +691,26 @@ function spawnTargets() {
   const W=canvas.width, H=canvas.height;
   const t=(gs.stage-1)/Math.max(gs.stageCount-1,1);
   const baseR=lerp(72,26,t);
-  const baseSpd=lerp(55,210,t);
+  const baseSpd=lerp(80,260,t);  // 전체 속도 상향
   const num=Math.min(1+Math.floor(gs.stage/2),4);
-  const maxY=H*0.70;
+  // maxY를 worldH보다 충분히 작게 → 하단 경계에서도 상하 이동 유지
+  const worldH=H*0.72;
+  const minY=90;
+  const maxY=worldH*0.82; // 하단 여유 확보 (기존 worldH-r 대신)
 
   for(let i=0;i<num;i++){
     const r=baseR+rand(0,10);
+    // dy를 dx와 동등하게 — 수직 속도 충분히 확보
+    const speed=baseSpd+rand(0,50);
+    const angle=rand(25,65)*(Math.PI/180); // 25~65도 각도로 이동
+    const dirX=Math.random()<0.5?1:-1;
+    const dirY=Math.random()<0.5?1:-1;
     targets.push({
       wx:rand(r+60,W-r-60),
-      wy:rand(r+80,maxY-r),
+      wy:rand(minY+r, maxY-r),
       r,
-      dx:(Math.random()<0.5?1:-1)*(baseSpd+rand(0,40)),
-      dy:(Math.random()<0.5?1:-1)*(baseSpd*0.6+rand(0,30)),
+      dx:dirX*speed*Math.cos(angle),
+      dy:dirY*speed*Math.sin(angle),
       hit:false, alpha:1,
     });
   }
@@ -551,10 +733,10 @@ function gameLoop(ts) {
 
   // Move crosshair from joystick
   if (joy.active) {
-    const speed=gs.adsActive?0.15:0.36;
+    const speed=gs.adsActive?0.55:1.1;  // 속도 3배 상향
     const n=55;
     cvx=(joy.dx/n)*speed; cvy=(joy.dy/n)*speed;
-  } else { cvx*=0.82; cvy*=0.82; }
+  } else { cvx*=0.75; cvy*=0.75; }  // 관성 빠르게 감소
   gs.cx=Math.min(Math.max(gs.cx+cvx*dt,0.02),0.98);
   gs.cy=Math.min(Math.max(gs.cy+cvy*dt,0.04),0.88);
 
@@ -630,11 +812,11 @@ function drawWorld(ctx,W,H,dt) {
     if(t.hit){ t.alpha=Math.max(0,t.alpha-dt*4); }
     else {
       t.wx+=t.dx*dt; t.wy+=t.dy*dt;
-      const maxY=worldH;
-      if(t.wx-t.r<0){t.wx=t.r;t.dx*=-1;}
-      if(t.wx+t.r>W){t.wx=W-t.r;t.dx*=-1;}
-      if(t.wy-t.r<80){t.wy=80+t.r;t.dy*=-1;}
-      if(t.wy+t.r>maxY-t.r){t.wy=maxY-t.r;t.dy*=-1;}
+      const minY=90, maxY=worldH*0.82;
+      if(t.wx-t.r<0){t.wx=t.r;t.dx=Math.abs(t.dx);}
+      if(t.wx+t.r>W){t.wx=W-t.r;t.dx=-Math.abs(t.dx);}
+      if(t.wy-t.r<minY){t.wy=minY+t.r;t.dy=Math.abs(t.dy);}
+      if(t.wy+t.r>maxY){t.wy=maxY-t.r;t.dy=-Math.abs(t.dy);}
     }
     if(t.alpha>0) drawTarget(ctx,t);
   }
@@ -747,9 +929,10 @@ function drawCrosshair(ctx,W,H){
 // ─────────────────────────────
 function doShoot(){
   if(gs.phase!=='playing') return;
-  if(gs.ammo<=0){ showPopupMsg('— RELOAD —','#e84855'); return; }
+  if(gs.ammo<=0){ showPopupMsg('— RELOAD —','#e84855'); playTimerBeep(true); return; }
 
   gs.ammo--; updateAmmoBar();
+  playGunshot();  // 총성
 
   // Recoil
   gs.cy-=(gs.adsActive?0.008:0.022);
@@ -776,6 +959,7 @@ function doShoot(){
       updateHUD();
       showScorePopup(sx,sy,pts);
       spawnParticles(t.wx,t.wy,pct<=0.2?'#f5a623':pct<=0.6?'#e84855':'#fff');
+      playHit(pct<=0.2);  // 명중음 (퍼펙트 여부)
       break;
     }
   }
@@ -783,8 +967,9 @@ function doShoot(){
     bulletHoles.push({x:sx,y:sy,alpha:1,ang:Math.random()*Math.PI*2});
     if(bulletHoles.length>20) bulletHoles.shift();
     showScorePopup(sx,sy,-1);
+    playMiss();  // 빗나감
   }
-  if(gs.ammo<=0) setTimeout(()=>{ gs.ammo=gs.maxAmmo; updateAmmoBar(); },1200);
+  if(gs.ammo<=0) setTimeout(()=>{ gs.ammo=gs.maxAmmo; updateAmmoBar(); playReload(); },1200);
 }
 
 // ─────────────────────────────
@@ -915,6 +1100,7 @@ function endStage(){
 
 function showResult(){
   clearInterval(stageTimer); cancelAnimationFrame(rafId);
+  playGameOver();
   const sorted=gs.players.map((n,i)=>({name:n,score:gs.totalScores[i]})).sort((a,b)=>b.score-a.score);
   document.getElementById('winnerName').textContent=sorted[0].name;
   document.getElementById('winnerScore').textContent=sorted[0].score.toLocaleString()+' PTS';
@@ -1002,9 +1188,22 @@ function resizeCanvas(){
   const c=document.getElementById('gameCanvas');
   c.width=window.innerWidth; c.height=window.innerHeight;
 }
-window.addEventListener('resize',()=>{ if(gs.phase==='playing') resizeCanvas(); });
+window.addEventListener('resize',()=>{
+  resizeCanvas();
+  // 방향 전환 시 조이스틱 리셋
+  stopJoy();
+});
+// orientationchange 이벤트도 별도 대응 (iOS Safari)
+window.addEventListener('orientationchange',()=>{
+  setTimeout(()=>{ resizeCanvas(); stopJoy(); }, 200);
+});
 document.getElementById('gameCanvas').addEventListener('contextmenu',e=>e.preventDefault());
 document.addEventListener('touchmove',e=>{ if(e.target===document.getElementById('gameCanvas')) e.preventDefault(); },{passive:false});
+
+// AudioContext 모바일 unlock (첫 터치/클릭 시 자동 활성화)
+['touchstart','mousedown'].forEach(ev=>{
+  document.addEventListener(ev, ()=>getACtx(), {once:true, passive:true});
+});
 
 showScreen('title');
 </script>
